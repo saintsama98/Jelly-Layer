@@ -1,0 +1,51 @@
+# Chainlink CRE Project Configuration
+name: jelly-engine
+version: 0.1.0
+
+# Workflow configuration
+workflows:
+  - name: jelly-liquidation-engine
+    path: ./cmd/jelly-engine
+    triggers:
+      - type: evm_log
+        config:
+          contract_address: "${ORACLE_ADDRESS}"
+          event_signature: "AnswerUpdated(uint256,int256,uint256)"
+      - type: evm_log
+        config:
+          contract_address: "${PRIORITY_QUEUE_ADDRESS}"
+          event_signature: "PrioritiesSubmitted(uint256,uint256)"
+      - type: evm_log
+        config:
+          contract_address: "${PRIORITY_QUEUE_ADDRESS}"
+          event_signature: "QueueUpdated(uint256)"
+      - type: evm_log
+        config:
+          contract_address: "${LIQUIDATION_ORCHESTRATOR_ADDRESS}"
+          event_signature: "LiquidationExecuted(uint256,address,uint256)"
+
+# Capabilities
+capabilities:
+  - name: evm
+    type: evm
+    config:
+      rpc_url: "${RPC_URL}"
+      chain_id: "${CHAIN_ID}"
+  
+  - name: http
+    type: http
+    config:
+      timeout: 30s
+
+# Targets (environments)
+targets:
+  - name: local
+    config:
+      chain_id: 31337
+      rpc_url: "http://localhost:8545"
+  
+  - name: sepolia
+    config:
+      chain_id: 11155111
+      rpc_url: "${SEPOLIA_RPC_URL}"
+
