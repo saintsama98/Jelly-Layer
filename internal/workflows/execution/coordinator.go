@@ -21,32 +21,24 @@ func NewTimingCoordinator(delayBlocks, windowSize int64) *TimingCoordinator {
 	}
 }
 
-// ReserveExecutionWindow reserves an execution window for a position.
+// ReserveExecutionWindow computes the execution window for a position (delay + window size).
+// Timing is enforced by the DON: the workflow waits until StartBlock then submits the liquidation.
+// No on-chain reservation is used; the contract trusts the DON as jellyEngine.
 func (tc *TimingCoordinator) ReserveExecutionWindow(
 	ctx context.Context,
 	client *evmwrap.Client,
 	position *contracts.ScoredPosition,
 	executor *contracts.Executor,
 ) (*contracts.ExecutionWindow, error) {
-	// Get current block
 	currentBlock, err := client.GetCurrentBlock(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Calculate window
 	window := &contracts.ExecutionWindow{
 		PositionID: position.Position.PositionID,
 		Executor:   executor.Address,
 		StartBlock: currentBlock + tc.delayBlocks,
 		EndBlock:   currentBlock + tc.delayBlocks + tc.windowSize,
 	}
-
-	// Reserve on-chain
-	err = client.ReserveWindow(ctx, window)
-	if err != nil {
-		return nil, err
-	}
-
 	return window, nil
 }

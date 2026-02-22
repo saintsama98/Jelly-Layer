@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"time"
 
 	evmwrap "github.com/jelly-layer-cre/jelly-engine/internal/capabilities/evm"
 	"github.com/jelly-layer-cre/jelly-engine/internal/contracts"
@@ -44,12 +45,29 @@ func (em *ExecutionMonitor) MonitorExecution(
 	return result, nil
 }
 
-// waitForBlock waits until target block is reached.
+// waitForBlock waits until chain tip is >= targetBlock (polls GetCurrentBlock).
+// Respects ctx cancellation. Polls every 1s; returns nil when current >= targetBlock.
 func (em *ExecutionMonitor) waitForBlock(ctx context.Context, targetBlock int64) error {
-	// TODO: Implement — poll client.GetCurrentBlock until >= targetBlock
-	_ = ctx
-	_ = targetBlock
-	return nil
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		current, err := em.client.GetCurrentBlock(ctx)
+		if err != nil {
+			return err
+		}
+		if current >= targetBlock {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+			// poll again
+		}
+	}
 }
 
 // checkExecutionStatus checks if execution succeeded.
@@ -62,9 +80,15 @@ func (em *ExecutionMonitor) checkExecutionStatus(ctx context.Context, plan *cont
 
 // isWithinDeadline checks if still within execution window.
 func (em *ExecutionMonitor) isWithinDeadline(plan *contracts.ExecutionPlan) bool {
-	// TODO: Implement — compare current block with plan.Window.EndBlock
-	_ = plan
-	return true
+	if plan == nil || plan.Window == nil {
+		return true
+	}
+	ctx := context.Background()
+	current, err := em.client.GetCurrentBlock(ctx)
+	if err != nil {
+		return false
+	}
+	return current <= plan.Window.EndBlock
 }
 
 // retryExecution retries a failed execution.

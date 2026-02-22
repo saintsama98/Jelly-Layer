@@ -116,11 +116,16 @@ func (h *DetectionHandler) HandleOracleUpdate(
 // This is Chainlink-specific but protocol-agnostic (all Chainlink feeds
 // emit the same event).
 func decodePriceUpdate(payload *evm.Log) (*contracts.PriceUpdate, error) {
-	var currentPrice *big.Int
-	var roundID *big.Int
+	var currentPrice, roundID *big.Int
 	if len(payload.Topics) >= 3 {
 		currentPrice = new(big.Int).SetBytes(payload.Topics[1])
 		roundID = new(big.Int).SetBytes(payload.Topics[2])
+	}
+	if currentPrice == nil {
+		currentPrice = new(big.Int)
+	}
+	if roundID == nil {
+		roundID = new(big.Int)
 	}
 
 	var updatedAt uint64

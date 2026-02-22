@@ -2,16 +2,20 @@ package distribution
 
 import (
 	"fmt"
+	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm/bindings"
 	"github.com/smartcontractkit/cre-sdk-go/cre"
 
 	"github.com/jelly-layer-cre/jelly-engine/internal/config"
 	"github.com/jelly-layer-cre/jelly-engine/internal/contracts"
 	evmwrap "github.com/jelly-layer-cre/jelly-engine/internal/capabilities/evm"
-	orchestrator "github.com/jelly-layer-cre/jelly-engine/internal/contracts/generated/liquidation_orchestrator"
 )
+
+// LiquidationExecutedEventSig is keccak256("LiquidationExecuted(uint256,address,uint256,bytes32)").
+var LiquidationExecutedEventSig = crypto.Keccak256Hash([]byte("LiquidationExecuted(uint256,address,uint256,bytes32)"))
 
 // DistributionResult is the output type for the distribution handler.
 type DistributionResult struct {
@@ -21,21 +25,63 @@ type DistributionResult struct {
 	ValidatorShare uint64
 }
 
+// decodedLiquidationExecuted holds decoded event fields for Handler 4.
+type decodedLiquidationExecuted struct {
+	PositionId  *big.Int
+	Executor    common.Address
+	CapturedOEV *big.Int
+	TxHash      [32]byte
+}
+
+// blockNumberToUint64 converts evm.Log's BlockNumber (type may be *big.Int or *pb.BigInt) to uint64.
+func blockNumberToUint64(blockNum interface{}) uint64 {
+	if blockNum == nil {
+		return 0
+	}
+	if bi, ok := blockNum.(*big.Int); ok && bi != nil {
+		return bi.Uint64()
+	}
+	// CRE SDK may use *pb.BigInt; try to get bytes and convert
+	type withBytes interface{ GetBytes() []byte }
+	if b, ok := blockNum.(withBytes); ok {
+		return new(big.Int).SetBytes(b.GetBytes()).Uint64()
+	}
+	return 0
+}
+
+// decodeLiquidationExecuted decodes LiquidationExecuted(uint256 indexed positionId, address indexed executor, uint256 capturedOEV, bytes32 txHash).
+func decodeLiquidationExecuted(log *evm.Log) decodedLiquidationExecuted {
+	var d decodedLiquidationExecuted
+	d.PositionId = new(big.Int)
+	if len(log.Topics) >= 2 {
+		d.PositionId.SetBytes(log.Topics[1])
+	}
+	if len(log.Topics) >= 3 {
+		d.Executor = common.BytesToAddress(log.Topics[2])
+	}
+	if len(log.Data) >= 64 {
+		d.CapturedOEV = new(big.Int).SetBytes(log.Data[:32])
+		copy(d.TxHash[:], log.Data[32:64])
+	}
+	return d
+}
+
 // HandleDistribution is the callback for Handler 4: Liquidation Executed → OEV Distribution.
 //
 // Trigger: LiquidationExecuted event from the LiquidationOrchestrator contract.
 func HandleDistribution(
 	cfg *config.Config,
 	runtime cre.Runtime,
-	payload *bindings.DecodedLog[orchestrator.LiquidationExecutedDecoded],
+	payload *evm.Log,
 ) (*DistributionResult, error) {
 	logger := runtime.Logger()
 
+	data := decodeLiquidationExecuted(payload)
 	logger.Info("Distribution triggered",
-		"positionId", payload.Data.PositionId,
-		"executor", payload.Data.Executor.Hex(),
-		"capturedOEV", payload.Data.CapturedOEV,
-		"block", payload.Log.BlockNumber,
+		"positionId", data.PositionId,
+		"executor", data.Executor.Hex(),
+		"capturedOEV", data.CapturedOEV,
+		"block", payload.BlockNumber,
 	)
 
 	// --- Get EVM client ---
@@ -51,11 +97,12 @@ func HandleDistribution(
 	client := evmwrap.NewClientFromSDK(evmClient)
 
 	// --- Parse the liquidation event data ---
+	blockTs := blockNumberToUint64(payload.BlockNumber)
 	liquidationEvent := &contracts.LiquidationEvent{
-		LiquidationID: payload.Data.PositionId.Uint64(),
-		Executor:      payload.Data.Executor.Hex(),
-		CapturedOEV:   payload.Data.CapturedOEV.Uint64(),
-		Timestamp:     payload.Log.BlockNumber.Uint64(),
+		LiquidationID: data.PositionId.Uint64(),
+		Executor:      data.Executor.Hex(),
+		CapturedOEV:   data.CapturedOEV.Uint64(),
+		Timestamp:     blockTs,
 	}
 
 	// --- Calculate OEV captured ---

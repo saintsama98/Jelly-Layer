@@ -58,9 +58,10 @@ func (c *Client) GetCurrentBlock(ctx context.Context) (int64, error) {
 	return blockNum.Int64(), nil
 }
 
-// ReserveWindow reserves execution window on-chain.
+// ReserveWindow would reserve an execution window on-chain. Intentionally a no-op:
+// with DON-verified execution, timing is enforced by the workflow; the contract
+// trusts the DON (jellyEngine) and does not need on-chain window reservation.
 func (c *Client) ReserveWindow(ctx context.Context, window interface{}) error {
-	// TODO: Implement — call LiquidationOrchestrator.reserveWindow via WriteContract
 	_ = window
 	return nil
 }

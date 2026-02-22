@@ -192,8 +192,8 @@ func (a *LendingAdapter) GetLiquidationCalldata(
 	runtime cre.Runtime,
 	position *contracts.Position,
 ) ([]byte, error) {
-	_ = client   // reserved for future use
-	_ = runtime  // reserved for future use
+	_ = client  // reserved for future use
+	_ = runtime // reserved for future use
 	borrower := common.HexToAddress(position.UserAddress)
 	callData, err := getAllPositionsABI.Pack("liquidate", borrower)
 	if err != nil {
@@ -201,5 +201,3 @@ func (a *LendingAdapter) GetLiquidationCalldata(
 	}
 	return callData, nil
 }
-
-

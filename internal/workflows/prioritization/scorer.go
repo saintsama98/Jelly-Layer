@@ -29,19 +29,23 @@ func NewScorer() *Scorer {
 	}
 }
 
-// CalculateScore calculates priority score for a position
-func (s *Scorer) CalculateScore(position *contracts.Position, volatility float64) float64 {
+// CalculateScore calculates priority score for a position.
+func (s *Scorer) CalculateScore(position *contracts.PositionWithOEV, volatility float64) float64 {
+	if position == nil {
+		return 0
+	}
+	p := &position.Position
 	// Component 1: Health Factor Severity (0-40 points)
-	hfSeverity := (1.0 - position.HealthFactor) * 40.0
+	hfSeverity := (1.0 - p.HealthFactor) * 40.0
 
 	// Component 2: OEV Potential (0-30 points)
 	oevScore := normalizeOEV(position.OEVPotential) * 30.0
 
 	// Component 3: Systemic Risk (0-20 points)
-	systemicRisk := normalizeRisk(position.DebtValue, position.ProtocolTVL) * 20.0
+	systemicRisk := normalizeRisk(p.DebtValue, p.ProtocolTVL) * 20.0
 
 	// Component 4: Time Decay (0-10 points)
-	timeDecay := calculateTimeDecay(position.TimeSinceUndercollateralized) * 10.0
+	timeDecay := calculateTimeDecay(p.TimeSinceUndercollateralized) * 10.0
 
 	// Market condition adaptation
 	var baseScore float64
@@ -62,10 +66,17 @@ func (s *Scorer) CalculateScore(position *contracts.Position, volatility float64
 	return baseScore
 }
 
-// normalizeOEV normalizes OEV potential to 0-1 range
+// normalizeOEV normalizes OEV potential to 0-1 range (cap at 1.0).
+// Uses a fixed scale so typical wei-denominated OEV values map to [0, 1].
 func normalizeOEV(oevPotential uint64) float64 {
-	// TODO: Implement normalization based on max OEV
-	return 0.5 // Placeholder
+	const scale = 1e15
+	if oevPotential >= scale {
+		return 1.0
+	}
+	if oevPotential == 0 {
+		return 0
+	}
+	return float64(oevPotential) / float64(scale)
 }
 
 // normalizeRisk normalizes systemic risk to 0-1 range

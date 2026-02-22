@@ -1,6 +1,8 @@
 package prioritization
 
 import (
+	"sort"
+
 	"github.com/jelly-layer-cre/jelly-engine/internal/contracts"
 )
 
@@ -34,15 +36,35 @@ func (ma *MarketAdapter) AdaptPrioritization(
 	return positions
 }
 
-// sortByHealthFactor sorts positions by health factor severity
+// sortByHealthFactor sorts positions by health factor ascending (most underwater first).
 func sortByHealthFactor(positions []*contracts.ScoredPosition) []*contracts.ScoredPosition {
-	// TODO: Implement sorting
-	return positions
+	out := make([]*contracts.ScoredPosition, len(positions))
+	copy(out, positions)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i] == nil || out[i].Position == nil {
+			return false
+		}
+		if out[j] == nil || out[j].Position == nil {
+			return true
+		}
+		return out[i].Position.HealthFactor < out[j].Position.HealthFactor
+	})
+	return out
 }
 
-// sortByOEV sorts positions by OEV potential
+// sortByOEV sorts positions by OEV potential descending (highest OEV first).
 func sortByOEV(positions []*contracts.ScoredPosition) []*contracts.ScoredPosition {
-	// TODO: Implement sorting
-	return positions
+	out := make([]*contracts.ScoredPosition, len(positions))
+	copy(out, positions)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i] == nil || out[i].Position == nil {
+			return false
+		}
+		if out[j] == nil || out[j].Position == nil {
+			return true
+		}
+		return out[i].Position.OEVPotential > out[j].Position.OEVPotential
+	})
+	return out
 }
 
