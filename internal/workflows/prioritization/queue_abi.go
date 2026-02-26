@@ -126,6 +126,6 @@ func solToPositionWithOEV(sol *solLiquidationPosition, id uint64) *contracts.Pos
 			DebtToken:       "",
 		},
 		OEVPotential:     0,
-		EstimatedGasCost:  0,
+		EstimatedGasCost: 0,
 	}
 }

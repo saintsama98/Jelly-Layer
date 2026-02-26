@@ -57,3 +57,8 @@ func (c *ChainlinkAggregator) LogTriggerAnswerUpdatedLog(
 
 
 
+
+
+
+
+

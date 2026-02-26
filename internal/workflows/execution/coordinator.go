@@ -13,7 +13,6 @@ type TimingCoordinator struct {
 	windowSize  int64
 }
 
-// NewTimingCoordinator creates a new coordinator.
 func NewTimingCoordinator(delayBlocks, windowSize int64) *TimingCoordinator {
 	return &TimingCoordinator{
 		delayBlocks: delayBlocks,
