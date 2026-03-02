@@ -108,7 +108,7 @@ func HandleDistribution(
 	}
 
 	// --- Calculate OEV captured ---
-	oevCaptured, err := calculateOEVCaptured(client, liquidationEvent)
+	oevCaptured, err := calculateOEVCaptured(client, cfg, liquidationEvent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate OEV: %w", err)
 	}
@@ -154,30 +154,70 @@ func HandleDistribution(
 }
 
 // calculateOEVCaptured calculates the actual OEV captured from the liquidation.
-func calculateOEVCaptured(client *evmwrap.Client, event *contracts.LiquidationEvent) (uint64, error) {
-	// Prefer auction-based OEV if an auction house is configured. We treat the
-	// total bid amount for the position as the OEV captured via the auction.
-	if client != nil {
-		// We don't have direct access to config here, so callers that want
-		// auction-based OEV should pass it through via a higher-level helper.
-		// For now, fall back to the value emitted in the event.
+//
+// Preference order:
+//   1. If a LiquidationAuctionHouse is configured, use its recorded totalBid
+//      for the position as the OEV captured via the auction.
+//   2. Fall back to the value emitted in the LiquidationExecuted event.
+func calculateOEVCaptured(client *evmwrap.Client, cfg *config.Config, event *contracts.LiquidationEvent) (uint64, error) {
+	// Try auction-based OEV first if configured.
+	if client != nil && cfg != nil && cfg.LiquidationAuctionHouseAddress != "" {
+		ctx := context.Background()
+		// Solidity signature:
+		//   function auctions(uint256 positionId) external view returns (
+		//       uint256 positionId,
+		//       address executor,
+		//       uint256 totalBid,
+		//       uint256 upfrontAmount,
+		//       uint64 startBlock,
+		//       uint64 deadlineBlock,
+		//       bool settled,
+		//       bool success
+		//   );
+		results, err := client.Read(ctx, cfg.LiquidationAuctionHouseAddress, "auctions", event.LiquidationID)
+		if err == nil && len(results) >= 3 {
+			if totalBid, ok := results[2].(*big.Int); ok && totalBid != nil {
+				return totalBid.Uint64(), nil
+			}
+		}
 	}
+
+	// Fallback: use the captured OEV value emitted in the event.
 	return event.CapturedOEV, nil
 }
 
 // distributeOEV distributes OEV to recipients via the OEVDistributor contract.
 func distributeOEV(client *evmwrap.Client, cfg *config.Config, liquidationID uint64, distribution *contracts.Distribution) error {
-	// TODO: Implement — client.Write(ctx, cfg.OEVDistributorAddress, "distribute", ...)
-	_ = client
-	_ = cfg
-	_ = liquidationID
-	_ = distribution
+	if client == nil || cfg == nil {
+		return fmt.Errorf("missing client or config")
+	}
+	if cfg.OEVDistributorAddress == "" {
+		return fmt.Errorf("OEVDistributor address not configured")
+	}
+
+	ctx := context.Background()
+
+	// First, record the total OEV captured for this liquidation.
+	_, err := client.Write(ctx, cfg.OEVDistributorAddress, "captureOEV", liquidationID, distribution.TotalOEV)
+	if err != nil {
+		return fmt.Errorf("captureOEV call failed: %w", err)
+	}
+
+	// Then, trigger distribution according to the on-chain split logic
+	// (50% protocol / 50% executor / 0% validator in the current design).
+	_, err = client.Write(ctx, cfg.OEVDistributorAddress, "distribute", liquidationID)
+	if err != nil {
+		return fmt.Errorf("distribute call failed: %w", err)
+	}
+
 	return nil
 }
 
 // recordDistribution records the distribution on-chain for transparency.
 func recordDistribution(client *evmwrap.Client, cfg *config.Config, liquidationID uint64, distribution *contracts.Distribution) error {
-	// TODO: Implement — client.Write(ctx, cfg.OEVDistributorAddress, "recordDistribution", ...)
+	// The OEVDistributor already persists the distribution in its state and
+	// emits events via captureOEV/distribute, so there is nothing additional
+	// to record here for now.
 	_ = client
 	_ = cfg
 	_ = liquidationID

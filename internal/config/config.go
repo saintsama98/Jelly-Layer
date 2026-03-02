@@ -34,9 +34,11 @@ type Config struct {
 	MaxLiquidationCapacity uint64  // in wei
 	MaxPriceImpact         float64 // percentage (0.05 = 5%)
 	LiquidationBonus       float64 // percentage (0.05 = 5%)
-	OEVProtocolSplit       float64 // percentage (0.40 = 40%)
-	OEVExecutorSplit       float64 // percentage (0.50 = 50%)
-	OEVValidatorSplit      float64 // percentage (0.10 = 10%)
+	// OEV splits are expressed as fractions (0.50 = 50%).
+	// Current design: 50% protocol, 50% executor, 0% validator.
+	OEVProtocolSplit  float64 // e.g. 0.50 = 50%
+	OEVExecutorSplit  float64 // e.g. 0.50 = 50%
+	OEVValidatorSplit float64 // e.g. 0.00 = 0%
 
 	// Execution window
 	ExecutionDelayBlocks int64
@@ -84,9 +86,10 @@ func LoadConfig() (*Config, error) {
 		MaxLiquidationCapacity:         getEnvUint64("MAX_LIQUIDATION_CAPACITY", 1_000_000_000_000_000_000_000_000),
 		MaxPriceImpact:                 getEnvFloat64("MAX_PRICE_IMPACT", 0.05),
 		LiquidationBonus:               getEnvFloat64("LIQUIDATION_BONUS", 0.05),
-		OEVProtocolSplit:               getEnvFloat64("OEV_PROTOCOL_SPLIT", 0.40),
-		OEVExecutorSplit:               getEnvFloat64("OEV_EXECUTOR_SPLIT", 0.50),
-		OEVValidatorSplit:              getEnvFloat64("OEV_VALIDATOR_SPLIT", 0.10),
+		// Default OEV split: 50% protocol / 50% executor / 0% validator.
+		OEVProtocolSplit:  getEnvFloat64("OEV_PROTOCOL_SPLIT", 0.50),
+		OEVExecutorSplit:  getEnvFloat64("OEV_EXECUTOR_SPLIT", 0.50),
+		OEVValidatorSplit: getEnvFloat64("OEV_VALIDATOR_SPLIT", 0.00),
 		ExecutionDelayBlocks:           getEnvInt64("EXECUTION_DELAY_BLOCKS", 5),
 		ExecutionWindowSize:            getEnvInt64("EXECUTION_WINDOW_SIZE", 10),
 		ExecutionStrategy:              getEnv("EXECUTION_STRATEGY", "STAKER_POOL"),
