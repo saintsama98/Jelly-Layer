@@ -67,7 +67,12 @@ func HandleExecution(
 	failed := 0
 
 	// Process each position in queue
-	selector := NewLiquidatorSelector("STAKER_POOL")
+	strategy := cfg.ExecutionStrategy
+	if strategy == "" {
+		// Default to staker pool if not explicitly configured.
+		strategy = "STAKER_POOL"
+	}
+	selector := NewLiquidatorSelector(strategy)
 	coordinator := NewTimingCoordinator(cfg.ExecutionDelayBlocks, cfg.ExecutionWindowSize)
 
 	monitor := NewExecutionMonitor(client)
@@ -111,10 +116,18 @@ func HandleExecution(
 		// Execute liquidation via LiquidationOrchestrator
 		err = executeLiquidation(ctx, client, cfg, executionPlan)
 		if err != nil {
+			// Mark auction failure, if applicable.
+			_ = settleAuction(ctx, client, cfg, executionPlan, false)
+			// Record a failed attempt for the selected executor.
+			if executionPlan.Executor != nil {
+				_ = UpdateExecutorStats(ctx, client, cfg, executionPlan.Executor.Address, 0, 1, 0)
+			}
 			failed++
 			continue
 		}
 
+		// Mark auction success, if applicable.
+		_ = settleAuction(ctx, client, cfg, executionPlan, true)
 		executed++
 	}
 
@@ -199,5 +212,40 @@ func executeLiquidation(ctx context.Context, client *evmwrap.Client, cfg *config
 		CollateralAmount: new(big.Int).SetUint64(pos.CollateralValue),
 	}
 	_, err := client.Write(ctx, cfg.LiquidationOrchestratorAddress, "executeLiquidation", params)
+	return err
+}
+
+// settleAuction notifies the LiquidationAuctionHouse of execution outcome for the
+// given plan's position/executor, when auction-based selection is enabled.
+func settleAuction(
+	ctx context.Context,
+	client *evmwrap.Client,
+	cfg *config.Config,
+	plan *contracts.ExecutionPlan,
+	success bool,
+) error {
+	if cfg == nil || cfg.LiquidationAuctionHouseAddress == "" {
+		return nil
+	}
+	if plan == nil || plan.Position == nil || plan.Position.Position == nil {
+		return nil
+	}
+	positionNumeric := positionIDToUint64(plan.Position.Position.PositionID)
+	if positionNumeric == 0 {
+		return nil
+	}
+
+	method := "settleFailure"
+	if success {
+		method = "settleSuccess"
+	}
+
+	args := struct {
+		PositionId *big.Int
+	}{
+		PositionId: new(big.Int).SetUint64(positionNumeric),
+	}
+
+	_, err := client.Write(ctx, cfg.LiquidationAuctionHouseAddress, method, args)
 	return err
 }

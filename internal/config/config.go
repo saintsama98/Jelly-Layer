@@ -23,6 +23,9 @@ type Config struct {
 	OEVDistributorAddress          string
 	LendingPoolAddress             string
 
+	// Optional: address of LiquidationAuctionHouse for auction-based executor selection.
+	LiquidationAuctionHouseAddress string
+
 	// Protocol adapter — determines which lending pool adapter to use.
 	// Supported: "jelly_mock", (future: "aave_v3", "morpho_blue", "compound_v3")
 	ProtocolType string
@@ -38,6 +41,13 @@ type Config struct {
 	// Execution window
 	ExecutionDelayBlocks int64
 	ExecutionWindowSize  int64
+
+	// ExecutionStrategy controls how executors are selected for positions.
+	// Supported values:
+	//   - "STAKER_POOL" (default): highest stake * success rate
+	//   - "AUCTION": auction-style selection with on-chain accounting
+	//   - "ROUND_ROBIN": placeholder, currently falls back to STAKER_POOL
+	ExecutionStrategy string
 }
 
 // Address bytes helpers — return 20-byte EVM addresses for use in evm.FilterLogTriggerRequest.
@@ -69,6 +79,7 @@ func LoadConfig() (*Config, error) {
 		LiquidationOrchestratorAddress: getEnv("LIQUIDATION_ORCHESTRATOR_ADDRESS", ""),
 		OEVDistributorAddress:          getEnv("OEV_DISTRIBUTOR_ADDRESS", ""),
 		LendingPoolAddress:             getEnv("LENDING_POOL_ADDRESS", ""),
+		LiquidationAuctionHouseAddress: getEnv("LIQUIDATION_AUCTION_HOUSE_ADDRESS", ""),
 		ProtocolType:                   getEnv("PROTOCOL_TYPE", "jelly_mock"),
 		MaxLiquidationCapacity:         getEnvUint64("MAX_LIQUIDATION_CAPACITY", 1_000_000_000_000_000_000_000_000),
 		MaxPriceImpact:                 getEnvFloat64("MAX_PRICE_IMPACT", 0.05),
@@ -78,6 +89,7 @@ func LoadConfig() (*Config, error) {
 		OEVValidatorSplit:              getEnvFloat64("OEV_VALIDATOR_SPLIT", 0.10),
 		ExecutionDelayBlocks:           getEnvInt64("EXECUTION_DELAY_BLOCKS", 5),
 		ExecutionWindowSize:            getEnvInt64("EXECUTION_WINDOW_SIZE", 10),
+		ExecutionStrategy:              getEnv("EXECUTION_STRATEGY", "STAKER_POOL"),
 	}, nil
 }
 
