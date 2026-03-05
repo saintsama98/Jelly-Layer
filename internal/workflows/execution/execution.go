@@ -191,7 +191,8 @@ func validateExecution(client *evmwrap.Client, monitor *ExecutionMonitor, plan *
 }
 
 // executeLiquidation submits the liquidation transaction via LiquidationOrchestrator.executeLiquidation(LiquidationParams).
-// Contract expects a single struct (positionId, executor, debtAmount, collateralAmount).
+// Contract expects a single struct matching LiquidationOrchestrator.LiquidationParams:
+// (positionId, executor, debtAmount, collateralAmount, borrower, oevPotential, estimatedGasCost).
 func executeLiquidation(ctx context.Context, client *evmwrap.Client, cfg *config.Config, plan *contracts.ExecutionPlan) error {
 	if cfg == nil || cfg.LiquidationOrchestratorAddress == "" {
 		return nil // no orchestrator configured; skip (POC)
@@ -200,16 +201,33 @@ func executeLiquidation(ctx context.Context, client *evmwrap.Client, cfg *config
 		return nil
 	}
 	pos := plan.Position.Position // PositionWithOEV embeds Position
+
+	// Build params in the exact field order of the Solidity struct:
+	// struct LiquidationParams {
+	//   uint256 positionId;
+	//   address executor;
+	//   uint256 debtAmount;
+	//   uint256 collateralAmount;
+	//   address borrower;
+	//   uint256 oevPotential;
+	//   uint256 estimatedGasCost;
+	// }
 	params := struct {
 		PositionId       *big.Int
 		Executor         common.Address
 		DebtAmount       *big.Int
 		CollateralAmount *big.Int
+		Borrower         common.Address
+		OEVPotential     *big.Int
+		EstimatedGasCost *big.Int
 	}{
 		PositionId:       new(big.Int).SetUint64(positionIDToUint64(pos.PositionID)),
 		Executor:         common.HexToAddress(plan.Executor.Address),
 		DebtAmount:       new(big.Int).SetUint64(pos.DebtValue),
 		CollateralAmount: new(big.Int).SetUint64(pos.CollateralValue),
+		Borrower:         common.HexToAddress(pos.UserAddress),
+		OEVPotential:     new(big.Int).SetUint64(pos.OEVPotential),
+		EstimatedGasCost: new(big.Int).SetUint64(pos.EstimatedGasCost),
 	}
 	_, err := client.Write(ctx, cfg.LiquidationOrchestratorAddress, "executeLiquidation", params)
 	return err

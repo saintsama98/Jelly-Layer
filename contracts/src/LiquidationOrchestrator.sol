@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+interface ILendingPoolJellyMock {
+    function liquidate(address borrower) external;
+}
+
 /**
  * @title LiquidationOrchestrator
  * @notice Orchestrates liquidation execution with CRE coordination
@@ -11,6 +15,12 @@ contract LiquidationOrchestrator {
         address executor;
         uint256 debtAmount;
         uint256 collateralAmount;
+        address borrower;
+        // Planner-provided OEV estimate (fallback notion, not realized value).
+        // For JellyMock this maps to PositionWithOEV.OEVPotential.
+        uint256 oevPotential;
+        // Optional: the gas cost estimate used by the planner (for transparency).
+        uint256 estimatedGasCost;
     }
 
     struct LiquidationResult {
@@ -64,13 +74,15 @@ contract LiquidationOrchestrator {
      * @notice Execute liquidation (called by CRE Execution workflow)
      */
     function executeLiquidation(LiquidationParams memory params) external onlyJellyEngine returns (LiquidationResult memory) {
+        require(params.borrower != address(0), "Invalid borrower");
+
         // Validate liquidation
         require(validateLiquidation(params.positionId), "Invalid liquidation");
         
-        // Execute liquidation on lending pool
-        // TODO: Call lending pool's liquidate function
-        // This is a placeholder - actual implementation depends on lending pool interface
-        
+        // Call underlying lending pool's liquidate function for the borrower.
+        ILendingPoolJellyMock(lendingPool).liquidate(params.borrower);
+ 
+        // Use planner-provided OEV notion as a fallback estimate.
         uint256 capturedOEV = calculateOEVCaptured(params);
         
         LiquidationResult memory result = LiquidationResult({
@@ -88,10 +100,13 @@ contract LiquidationOrchestrator {
     }
 
     /**
-     * @notice Validate liquidation eligibility
+     * @notice borrower validation basic
      */
     function validateLiquidation(uint256 positionId) public view returns (bool) {
-        // TODO: Implement validation logic
+        if (liquidationResults[positionId].executed) {
+            return false;
+        }
+
         // Check if position is still liquidatable
         return true;
     }
@@ -107,9 +122,14 @@ contract LiquidationOrchestrator {
      * @notice Calculate OEV captured
      */
     function calculateOEVCaptured(LiquidationParams memory params) internal pure returns (uint256) {
-        // TODO: Implement OEV calculation
-        // OEV = (Collateral * Bonus) - Debt - Gas
-        return 0;
+        // For JellyMock, the planner already computes OEVPotential as:
+        //   max(0, liquidationReward - estimatedGasCost)
+        // where liquidationReward = collateralValue * liquidationBonus.
+        //
+        // We treat this as an estimated "captured OEV" fallback when there is
+        // no auction house providing a realized on-chain value. It is NOT a
+        // precise economic settlement measure.
+        return params.oevPotential;
     }
 }
 

@@ -16,4 +16,7 @@ type LiquidationParams struct {
 	Executor         string
 	DebtAmount       uint64
 	CollateralAmount uint64
+	Borrower         string
+	OEVPotential     uint64
+	EstimatedGasCost uint64
 }

@@ -42,6 +42,7 @@ contract OEVDistributor {
     
     //oevToken for feasibility
     IERC20 public oevToken;
+    ILiquidationAuctionHouse public liquidationAuctionHouse;
     // Current design: 50% protocol / 50% executor / 0% validator.
     uint256 public constant PROTOCOL_SPLIT = 50; // 50%
     uint256 public constant EXECUTOR_SPLIT = 50; // 50%
@@ -62,9 +63,10 @@ contract OEVDistributor {
 
 
     /// @param _protocolTreasury address for protocol treasury
-    constructor(address _protocolTreasury) {
+    constructor(address _protocolTreasury, address _liquidationAuctionHouse) {
         owner = msg.sender;
         protocolTreasury = _protocolTreasury;
+        liquidationAuctionHouse = ILiquidationAuctionHouse(_liquidationAuctionHouse);
     }
 
     function setJellyEngine(address _jellyEngine) external {
@@ -98,7 +100,7 @@ contract OEVDistributor {
 
         //we shall first get the liquidator or executor from the auction house
 
-        ILiquidationAuctionHouse.Auction memory auction =  ILiquidationAuctionHouse(LiquidationAuctionHouse).getAuction(liquidationId);
+        ILiquidationAuctionHouse.Auction memory auction =  liquidationAuctionHouse.getAuction(liquidationId);
 
         address executor= auction.executor;
 
@@ -125,8 +127,7 @@ contract OEVDistributor {
         emit OEVDistributed(
             liquidationId,
             dist.protocolShare,
-            dist.executorShare,
-            dist.validatorShare
+            dist.executorShare
         );
     }
 
