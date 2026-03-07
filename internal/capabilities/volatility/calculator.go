@@ -6,12 +6,20 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	httpclient "github.com/jelly-layer-cre/jelly-engine/internal/capabilities/http"
 )
+
+// EnvVolatilityOverridePrefix is the env var prefix for per-token overrides: VOLATILITY_OVERRIDE_ETH=0.42
+const EnvVolatilityOverridePrefix = "VOLATILITY_OVERRIDE_"
+
+// EnvVolatilityOverride is the env var for a single override applied to any token when no per-token override is set.
+const EnvVolatilityOverride = "VOLATILITY_OVERRIDE"
 
 // HTTPGetter performs GET requests and returns body and status code.
 // Implemented by http.Client; can be mocked in tests.
@@ -19,9 +27,16 @@ type HTTPGetter interface {
 	GetWithStatus(ctx context.Context, url string) ([]byte, int, error)
 }
 
+// VolatilityLogger is used to log API calls and results when set. Satisfied by runtime.Logger().
+type VolatilityLogger interface {
+	Info(msg string, keyvals ...any)
+	Warn(msg string, keyvals ...any)
+}
+
 // Calculator calculates market volatility from historical price data.
 type Calculator struct {
 	httpGetter HTTPGetter
+	logger     VolatilityLogger // optional; when set, logs API calls and results
 }
 
 // NewCalculator creates a new volatility calculator using the default HTTP client.
@@ -31,49 +46,131 @@ func NewCalculator() *Calculator {
 	}
 }
 
+// NewCalculatorWithLogger creates a calculator that logs volatility API calls (for debugging).
+func NewCalculatorWithLogger(logger VolatilityLogger) *Calculator {
+	return &Calculator{
+		httpGetter: httpclient.NewClient(),
+		logger:     logger,
+	}
+}
+
 // NewCalculatorWithGetter creates a calculator that uses the given getter (for tests or custom clients).
 func NewCalculatorWithGetter(getter HTTPGetter) *Calculator {
 	return &Calculator{httpGetter: getter}
 }
 
+// NewCalculatorWithGetterAndLogger creates a calculator with a custom getter and logger (e.g. for CRE HTTP capability).
+func NewCalculatorWithGetterAndLogger(getter HTTPGetter, logger VolatilityLogger) *Calculator {
+	return &Calculator{httpGetter: getter, logger: logger}
+}
+
 //volatility normalization
 
 // CalculateVolatility calculates a normalized volatility index (0-1) for a token.
+// When running in CRE workflow simulate (WASM), outbound HTTP is typically unavailable;
+// set VOLATILITY_OVERRIDE_<TOKEN> or VOLATILITY_OVERRIDE to inject a pre-fetched value (e.g. from scripts/fetch-volatility.sh).
 func (c *Calculator) CalculateVolatility(ctx context.Context, tokenSymbol string) (float64, error) {
+	// Allow override from env so simulate (no network) can use pre-fetched volatility from the host.
+	if v := getVolatilityOverride(tokenSymbol); v >= 0 {
+		if c.logger != nil {
+			c.logger.Info("[Volatility] Using override (no network in simulate)", "token", tokenSymbol, "vol", v)
+		}
+		return v, nil
+	}
+
 	var vols []float64
 	hasNonErrorSource := false
 
+	if c.logger != nil {
+		c.logger.Info("[Volatility] Fetching", "token", tokenSymbol)
+	}
+
 	// CoinGecko source
 	if prices, err := c.fetchRecentPricesCoinGecko(ctx, tokenSymbol); err != nil {
-		// If all sources fail with errors, we return an error below.
+		if c.logger != nil {
+			c.logger.Warn("[Volatility] CoinGecko failed", "token", tokenSymbol, "error", err)
+		}
 	} else if prices != nil {
 		hasNonErrorSource = true
 		if len(prices) >= 2 {
-			vols = append(vols, calculateVolIndexFromPrices(prices))
+			vol := calculateVolIndexFromPrices(prices)
+			vols = append(vols, vol)
+			if c.logger != nil {
+				c.logger.Info("[Volatility] CoinGecko OK", "token", tokenSymbol, "prices", len(prices), "vol", vol)
+			}
 		}
 	}
 
 	// Binance source
 	if prices, err := c.fetchRecentPricesBinance(ctx, tokenSymbol); err != nil {
-		// Ignore individual source failures; other sources may still succeed.
+		if c.logger != nil {
+			c.logger.Warn("[Volatility] Binance failed", "token", tokenSymbol, "error", err)
+		}
 	} else if prices != nil {
 		hasNonErrorSource = true
 		if len(prices) >= 2 {
-			vols = append(vols, calculateVolIndexFromPrices(prices))
+			vol := calculateVolIndexFromPrices(prices)
+			vols = append(vols, vol)
+			if c.logger != nil {
+				c.logger.Info("[Volatility] Binance OK", "token", tokenSymbol, "prices", len(prices), "vol", vol)
+			}
+		}
+	}
+
+	// CoinCap source (fallback)
+	if prices, err := c.fetchRecentPricesCoinCap(ctx, tokenSymbol); err != nil {
+		if c.logger != nil {
+			c.logger.Warn("[Volatility] CoinCap failed", "token", tokenSymbol, "error", err)
+		}
+	} else if prices != nil {
+		hasNonErrorSource = true
+		if len(prices) >= 2 {
+			vol := calculateVolIndexFromPrices(prices)
+			vols = append(vols, vol)
+			if c.logger != nil {
+				c.logger.Info("[Volatility] CoinCap OK", "token", tokenSymbol, "prices", len(prices), "vol", vol)
+			}
 		}
 	}
 
 	if len(vols) > 0 {
-		return aggregateVolatilities(vols), nil
+		result := aggregateVolatilities(vols)
+		if c.logger != nil {
+			c.logger.Info("[Volatility] Result", "token", tokenSymbol, "vol", result, "sources", len(vols))
+		}
+		return result, nil
 	}
 	if hasNonErrorSource {
-		// At least one source responded but did not have enough data.
-		// Preserve existing behavior: treat as "no volatility data" -> 0.
+		if c.logger != nil {
+			c.logger.Info("[Volatility] No enough price data", "token", tokenSymbol, "vol", 0)
+		}
 		return 0, nil
 	}
 
-	// All sources failed with errors.
+	if c.logger != nil {
+		c.logger.Warn("[Volatility] All sources failed", "token", tokenSymbol)
+	}
 	return 0, fmt.Errorf("all volatility sources failed")
+}
+
+// getVolatilityOverride returns a non-negative value if VOLATILITY_OVERRIDE_<TOKEN> or VOLATILITY_OVERRIDE is set and parseable; otherwise -1.
+func getVolatilityOverride(tokenSymbol string) float64 {
+	for _, key := range []string{EnvVolatilityOverridePrefix + strings.ToUpper(tokenSymbol), EnvVolatilityOverride} {
+		if v := os.Getenv(key); v != "" {
+			f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			if err != nil {
+				continue
+			}
+			if f < 0 {
+				f = 0
+			}
+			if f > 1 {
+				f = 1
+			}
+			return f
+		}
+	}
+	return -1
 }
 
 // coingeckoMarketChart is the response from CoinGecko /coins/{id}/market_chart.
@@ -134,12 +231,20 @@ var symbolToBinanceSymbol = map[string]string{
 const (
 	coingeckoBaseURL = "https://api.coingecko.com/api/v3"
 	binanceBaseURL   = "https://api.binance.com"
+	coincapBaseURL   = "https://api.coincap.io/v2"
 
 	marketChartDays = 1
 
 	// 5m candles * 288 ≈ 24h
 	binanceKlinesLimit = 288
 )
+
+// symbolToCoinCapID maps token symbols to CoinCap asset IDs (same as CoinGecko-style ids).
+var symbolToCoinCapID = map[string]string{
+	"ETH": "ethereum", "WETH": "ethereum", "BTC": "bitcoin", "WBTC": "bitcoin",
+	"LINK": "chainlink", "UNI": "uniswap", "AAVE": "aave", "MATIC": "polygon", "POL": "polygon",
+	"AVAX": "avalanche", "SOL": "solana", "ARB": "arbitrum", "OP": "optimism",
+}
 
 // fetchRecentPricesCoinGecko fetches recent prices from CoinGecko market_chart API.
 // tokenSymbol is the ticker (e.g. "ETH", "BTC"). Unmapped symbols are lowercased and used as CoinGecko id.
@@ -218,6 +323,57 @@ func (c *Calculator) fetchRecentPricesBinance(ctx context.Context, tokenSymbol s
 		prices = append(prices, p)
 	}
 	if len(prices) == 0 {
+		return []float64{}, nil
+	}
+	return prices, nil
+}
+
+// coincapHistoryPoint is one point from CoinCap /assets/{id}/history.
+type coincapHistoryPoint struct {
+	PriceUsd string `json:"priceUsd"`
+	Time     string `json:"time"`
+}
+
+// coincapHistoryResponse is the response from CoinCap history API.
+type coincapHistoryResponse struct {
+	Data []coincapHistoryPoint `json:"data"`
+}
+
+// fetchRecentPricesCoinCap fetches recent 5m prices from CoinCap (fallback source).
+func (c *Calculator) fetchRecentPricesCoinCap(ctx context.Context, tokenSymbol string) ([]float64, error) {
+	assetID := symbolToCoinCapID[strings.ToUpper(tokenSymbol)]
+	if assetID == "" {
+		return nil, nil
+	}
+	endMs := time.Now().UnixMilli()
+	startMs := endMs - (24 * 60 * 60 * 1000)
+	apiURL := fmt.Sprintf("%s/assets/%s/history?interval=m5&start=%d&end=%d", coincapBaseURL, url.PathEscape(assetID), startMs, endMs)
+
+	body, statusCode, err := c.httpGetter.GetWithStatus(ctx, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch coincap: %w", err)
+	}
+	if statusCode != 200 {
+		return nil, fmt.Errorf("fetch coincap: API returned status %d", statusCode)
+	}
+
+	var resp coincapHistoryResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("fetch coincap: decode: %w", err)
+	}
+	if len(resp.Data) == 0 {
+		return []float64{}, nil
+	}
+
+	prices := make([]float64, 0, len(resp.Data))
+	for _, p := range resp.Data {
+		v, err := strconv.ParseFloat(p.PriceUsd, 64)
+		if err != nil {
+			continue
+		}
+		prices = append(prices, v)
+	}
+	if len(prices) < 2 {
 		return []float64{}, nil
 	}
 	return prices, nil

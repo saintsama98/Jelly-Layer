@@ -7,7 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm/bindings"
+
+	"github.com/jelly-layer-cre/jelly-engine/internal/contracts/bindingscompat"
 )
 
 // --- Event types ---
@@ -41,7 +42,7 @@ type PriorityQueue struct {
 	address   common.Address
 }
 
-func NewPriorityQueue(evmClient evm.Client, address common.Address, opts *bindings.BindingOptions) (*PriorityQueue, error) {
+func NewPriorityQueue(evmClient evm.Client, address common.Address, opts *bindingscompat.BindingOptions) (*PriorityQueue, error) {
 	return &PriorityQueue{
 		evmClient: evmClient,
 		address:   address,
@@ -54,16 +55,16 @@ func (pq *PriorityQueue) LogTriggerPrioritiesSubmittedLog(
 	chainSelector uint64,
 	confidence evm.ConfidenceLevel,
 	filters []PrioritiesSubmitted,
-) (*bindings.LogTrigger[PrioritiesSubmittedDecoded], error) {
-	return &bindings.LogTrigger[PrioritiesSubmittedDecoded]{}, nil
+) (*bindingscompat.LogTrigger[PrioritiesSubmittedDecoded], error) {
+	return &bindingscompat.LogTrigger[PrioritiesSubmittedDecoded]{}, nil
 }
 
 func (pq *PriorityQueue) LogTriggerQueueUpdatedLog(
 	chainSelector uint64,
 	confidence evm.ConfidenceLevel,
 	filters []QueueUpdated,
-) (*bindings.LogTrigger[QueueUpdatedDecoded], error) {
-	return &bindings.LogTrigger[QueueUpdatedDecoded]{}, nil
+) (*bindingscompat.LogTrigger[QueueUpdatedDecoded], error) {
+	return &bindingscompat.LogTrigger[QueueUpdatedDecoded]{}, nil
 }
 
 

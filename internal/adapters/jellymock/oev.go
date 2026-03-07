@@ -66,12 +66,12 @@ func (c *OEVCalc) CalculateOEVPotential(
 			EstimatedGasCost: estimatedGasCost,
 		}
 
-		logger.Debug("OEV calculated (jellymock)",
+		logger.Info("[Detection] OEV potential (realtime)",
 			"positionId", pos.PositionID,
 			"collateral", pos.CollateralValue,
-			"reward", liquidationReward,
-			"gasCost", estimatedGasCost,
-			"oev", oevPotential,
+			"liquidationReward", liquidationReward,
+			"estimatedGasCost", estimatedGasCost,
+			"oevPotential", oevPotential,
 			"protocol", "jelly_mock",
 		)
 

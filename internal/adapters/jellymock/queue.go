@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/smartcontractkit/chainlink-protos/cre/go/sdk"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
 	"github.com/smartcontractkit/cre-sdk-go/cre"
 
@@ -132,19 +133,35 @@ func (w *QueueWriterImpl) SubmitPositions(
 		return fmt.Errorf("failed to pack submitLiquidatablePositions: %w", err)
 	}
 
-	// --- Send the transaction via CRE EVM client ---
-	_, err = (*client).CallContract(runtime, &evm.CallContractRequest{
-		ContractAddress: w.QueueAddress.Bytes(),
-		CallData:        callData,
+	// --- Send the transaction via CRE EVM WriteReport (receiver = contract, report = calldata) ---
+	report, err := cre.X_GeneratedCodeOnly_WrapReport(&sdk.ReportResponse{
+		RawReport: callData,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to wrap report for queue submit: %w", err)
+	}
+	req := &evm.WriteCreReportRequest{
+		Receiver:  w.QueueAddress.Bytes(),
+		Report:    report,
+		GasConfig: nil,
+	}
+	reply, err := client.WriteReport(runtime, req).Await()
 	if err != nil {
 		return fmt.Errorf("failed to submit positions to priority queue: %w", err)
 	}
 
-	logger.Info("Positions submitted to PriorityQueue",
+	txHashHex := ""
+	if reply != nil && len(reply.TxHash) >= 32 {
+		txHashHex = common.BytesToHash(reply.TxHash).Hex()
+	}
+	logger.Info("[Detection] PriorityQueue API: submitLiquidatablePositions success",
 		"count", len(solPositions),
 		"contract", w.QueueAddress.Hex(),
+		"txHash", txHashHex,
 	)
+	if txHashHex != "" {
+		logger.Info("[Detection] Next: run Prioritization with --evm-tx-hash " + txHashHex)
+	}
 
 	return nil
 }

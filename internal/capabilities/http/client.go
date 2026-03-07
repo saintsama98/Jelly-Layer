@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+// DefaultTimeout is used for GET requests so calls don't hang in restricted environments.
+const DefaultTimeout = 15 * time.Second
 
 // Client wraps HTTP capabilities for CRE workflows.
 // In the real CRE SDK, HTTP access is provided via runtime.HTTPClient().
@@ -14,10 +18,10 @@ type Client struct {
 	inner *http.Client
 }
 
-// NewClient creates a new HTTP client.
+// NewClient creates a new HTTP client with DefaultTimeout.
 func NewClient() *Client {
 	return &Client{
-		inner: &http.Client{},
+		inner: &http.Client{Timeout: DefaultTimeout},
 	}
 }
 

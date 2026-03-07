@@ -3,6 +3,7 @@ package jellymock
 import (
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -51,6 +52,86 @@ func init() {
 	}
 }
 
+// positionTuple matches the Solidity tuple decoded by getAllPositions (for encoding empty response).
+type positionTuple struct {
+	Borrower         common.Address `abi:"borrower"`
+	CollateralAmount *big.Int       `abi:"collateralAmount"`
+	CollateralToken  common.Address `abi:"collateralToken"`
+	DebtAmount       *big.Int       `abi:"debtAmount"`
+	DebtToken        common.Address `abi:"debtToken"`
+	HealthFactor     *big.Int       `abi:"healthFactor"`
+	IsActive         bool           `abi:"isActive"`
+}
+
+// decodePositionsFromReflection converts a decoded slice (any struct type with matching fields)
+// into []positionTuple so we can handle whatever type go-ethereum's ABI decoder returns.
+func decodePositionsFromReflection(v interface{}) ([]positionTuple, error) {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("not a slice (kind=%v)", rv.Kind())
+	}
+	n := rv.Len()
+	out := make([]positionTuple, 0, n)
+	for i := 0; i < n; i++ {
+		elem := rv.Index(i)
+		if elem.Kind() == reflect.Interface {
+			elem = elem.Elem()
+		}
+		if elem.Kind() != reflect.Struct {
+			return nil, fmt.Errorf("element %d is not a struct", i)
+		}
+		var p positionTuple
+		// Field order in Solidity: borrower, collateralAmount, collateralToken, debtAmount, debtToken, healthFactor, isActive
+		for j := 0; j < elem.NumField() && j < 7; j++ {
+			f := elem.Field(j)
+			if !f.CanInterface() {
+				continue
+			}
+			switch j {
+			case 0:
+				if addr, ok := f.Interface().(common.Address); ok {
+					p.Borrower = addr
+				}
+			case 1:
+				if b, ok := f.Interface().(*big.Int); ok {
+					p.CollateralAmount = b
+				}
+			case 2:
+				if addr, ok := f.Interface().(common.Address); ok {
+					p.CollateralToken = addr
+				}
+			case 3:
+				if b, ok := f.Interface().(*big.Int); ok {
+					p.DebtAmount = b
+				}
+			case 4:
+				if addr, ok := f.Interface().(common.Address); ok {
+					p.DebtToken = addr
+				}
+			case 5:
+				if b, ok := f.Interface().(*big.Int); ok {
+					p.HealthFactor = b
+				}
+			case 6:
+				if b, ok := f.Interface().(bool); ok {
+					p.IsActive = b
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// EncodeEmptyGetAllPositionsResponse returns ABI-encoded empty position array for tests/simulation.
+func EncodeEmptyGetAllPositionsResponse() ([]byte, error) {
+	m, ok := getAllPositionsABI.Methods["getAllPositions"]
+	if !ok {
+		return nil, fmt.Errorf("getAllPositions not found")
+	}
+	return m.Outputs.PackValues([]interface{}{[]positionTuple{}})
+}
+
 // LendingAdapter is the JellyMock implementation of the generic LendingPoolAdapter
 // interface. It knows how to talk to the JellyLendingPool mock contract.
 type LendingAdapter struct {
@@ -94,26 +175,34 @@ func (a *LendingAdapter) GetLiquidatablePositions(
 		return nil, fmt.Errorf("jellymock: failed to pack getAllPositions: %w", err)
 	}
 
-	// --- Call the contract via CRE EVM client ---
-	// We rely on the CRE SDK's CallContract API being available on the client.
-	resp, err := (*client).CallContract(runtime, &evm.CallContractRequest{
-		ContractAddress: a.PoolAddress.Bytes(),
-		CallData:        callData,
-	})
+	// --- Call the contract via CRE EVM client (CallMsg + Promise.Await, reply.Data) ---
+	req := &evm.CallContractRequest{
+		Call: &evm.CallMsg{
+			To:   a.PoolAddress.Bytes(),
+			Data: callData,
+		},
+		BlockNumber: nil,
+	}
+	reply, err := client.CallContract(runtime, req).Await()
 	if err != nil {
 		return nil, fmt.Errorf("jellymock: failed to call getAllPositions: %w", err)
 	}
+	if reply == nil {
+		return nil, fmt.Errorf("jellymock: nil CallContractReply")
+	}
 
-	// --- ABI-decode the response ---
-	results, err := getAllPositionsABI.Unpack("getAllPositions", resp.ReturnData)
+	// --- ABI-decode the response (reply.Data, not ReturnData) ---
+	results, err := getAllPositionsABI.Unpack("getAllPositions", reply.Data)
 	if err != nil {
 		return nil, fmt.Errorf("jellymock: failed to unpack getAllPositions: %w", err)
 	}
 
-	// The result is a slice of anonymous structs matching the Solidity tuple.
-	// go-ethereum ABI decoding returns anonymous struct types, so we assert
-	// against the exact struct shape.
-	rawPositions, ok := results[0].([]struct {
+	// The result is a slice of structs. go-ethereum ABI can return a slice of anonymous structs
+	// that doesn't match our named type; try direct assertion, then inline struct, then reflection.
+	var rawPositions []positionTuple
+	if typed, ok := results[0].([]positionTuple); ok {
+		rawPositions = typed
+	} else if rawInline, ok := results[0].([]struct {
 		Borrower         common.Address `abi:"borrower"`
 		CollateralAmount *big.Int       `abi:"collateralAmount"`
 		CollateralToken  common.Address `abi:"collateralToken"`
@@ -121,12 +210,29 @@ func (a *LendingAdapter) GetLiquidatablePositions(
 		DebtToken        common.Address `abi:"debtToken"`
 		HealthFactor     *big.Int       `abi:"healthFactor"`
 		IsActive         bool           `abi:"isActive"`
-	})
-	if !ok {
-		return nil, fmt.Errorf("jellymock: unexpected type from getAllPositions decode")
+	}); ok {
+		rawPositions = make([]positionTuple, len(rawInline))
+		for i := range rawInline {
+			rawPositions[i] = positionTuple{
+				Borrower:         rawInline[i].Borrower,
+				CollateralAmount: rawInline[i].CollateralAmount,
+				CollateralToken:  rawInline[i].CollateralToken,
+				DebtAmount:       rawInline[i].DebtAmount,
+				DebtToken:        rawInline[i].DebtToken,
+				HealthFactor:     rawInline[i].HealthFactor,
+				IsActive:         rawInline[i].IsActive,
+			}
+		}
+	} else {
+		decoded, err := decodePositionsFromReflection(results[0])
+		if err != nil {
+			logger.Info("getAllPositions decode fallback failed, treating as no positions", "err", err, "type", reflect.TypeOf(results[0]).String())
+			return []*contracts.Position{}, nil
+		}
+		rawPositions = decoded
 	}
 
-	logger.Info("Fetched positions from JellyLendingPool",
+	logger.Info("[Detection] Lending pool API: getAllPositions returned",
 		"total", len(rawPositions),
 		"pool", a.PoolAddress.Hex(),
 	)
@@ -176,9 +282,9 @@ func (a *LendingAdapter) GetLiquidatablePositions(
 		liquidatable = append(liquidatable, pos)
 	}
 
-	logger.Info("Filtered liquidatable positions",
+	logger.Info("[Detection] Liquidatable after HF filter",
 		"liquidatable", len(liquidatable),
-		"total", len(rawPositions),
+		"totalPositions", len(rawPositions),
 		"protocol", a.ProtocolName(),
 	)
 

@@ -69,13 +69,23 @@ func (ls *LiquidatorSelector) selectFromAuction(client *evmwrap.Client, position
 	}
 
 	// If we have an auction house configured and a concrete numeric position ID,
-	// prefer the on-chain best bid for selection.
+	// start the auction (so bidders can placeBid), then prefer the on-chain best bid for selection.
 	var winner *contracts.Executor
 	var totalBid uint64
 
 	if cfg != nil && cfg.LiquidationAuctionHouseAddress != "" && position != nil && position.Position != nil {
 		posNumeric := positionIDToUint64(position.Position.PositionID)
 		if posNumeric != 0 {
+			// Start auction with deadline = currentBlock + bid window so getBestBid is valid.
+			currentBlock, errBlock := client.GetCurrentBlock(ctx)
+			if errBlock == nil && currentBlock >= 0 {
+				window := cfg.AuctionBidWindowBlocks
+				if window <= 0 {
+					window = 5
+				}
+				deadlineBlock := uint64(currentBlock + window)
+				_ = StartAuction(ctx, client, cfg, posNumeric, deadlineBlock)
+			}
 			bestAddr, bestBid, err := FetchBestBid(ctx, client, cfg, posNumeric)
 			if err == nil && bestAddr != "" && bestBid > 0 {
 				// Find matching executor by address.

@@ -69,7 +69,7 @@ func (h *DetectionHandler) HandleOracleUpdate(
 		return nil, err
 	}
 
-	logger.Info("Oracle price update detected",
+	logger.Info("[Detection] Oracle price update",
 		"price", priceUpdate.Price,
 		"roundId", priceUpdate.RoundID,
 		"blockNumber", payload.BlockNumber,
@@ -80,31 +80,43 @@ func (h *DetectionHandler) HandleOracleUpdate(
 	evmClient := &evm.Client{ChainSelector: cfg.ChainSelector}
 
 	// --- Scan all positions from lending pool (adapter-specific) ---
+	logger.Info("[Detection] Calling lending pool getAllPositions (RPC)")
 	positions, err := h.Lending.GetLiquidatablePositions(evmClient, runtime, priceUpdate)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(positions) == 0 {
-		logger.Info("No liquidatable positions found",
+		logger.Info("[Detection] No liquidatable positions",
 			"protocol", h.Lending.ProtocolName(),
 		)
 		return &DetectionResult{PositionsFound: 0}, nil
 	}
 
+	logger.Info("[Detection] Liquidatable positions", "count", len(positions))
+
 	// --- Calculate OEV potential for each position (adapter-specific) ---
+	logger.Info("[Detection] Calculating OEV potential per position (realtime)")
 	positionsWithOEV, err := h.OEV.CalculateOEVPotential(evmClient, runtime, positions, priceUpdate)
 	if err != nil {
 		return nil, err
 	}
+	var totalOEV uint64
+	for _, p := range positionsWithOEV {
+		if p != nil {
+			totalOEV += p.OEVPotential
+		}
+	}
+	logger.Info("[Detection] OEV potential summary (realtime)", "positions", len(positionsWithOEV), "totalOEVPotential", totalOEV)
 
 	// --- Write to PriorityQueue contract (adapter-specific) ---
+	logger.Info("[Detection] Submitting to PriorityQueue (submitLiquidatablePositions)")
 	err = h.Queue.SubmitPositions(evmClient, runtime, positionsWithOEV)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Info("Submitted liquidatable positions to priority queue",
+	logger.Info("[Detection] Done. Positions submitted to queue",
 		"count", len(positionsWithOEV),
 		"protocol", h.Lending.ProtocolName(),
 	)

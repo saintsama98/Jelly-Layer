@@ -15,34 +15,29 @@ import (
 	"github.com/jelly-layer-cre/jelly-engine/internal/contracts"
 )
 
-var executorRegistryABI abi.ABI
+var (
+	executorRegistryABI abi.ABI
+	auctionHouseABI     abi.ABI
+)
 
 func init() {
-	const abiJSON = `[{
-		"name": "getActiveExecutors",
-		"type": "function",
-		"stateMutability": "view",
-		"inputs": [],
-		"outputs": [{
-			"name": "",
-			"type": "tuple[]",
-			"components": [
-				{"name": "executorAddress", "type": "address"},
-				{"name": "successfulLiquidations", "type": "uint256"},
-				{"name": "failedAttempts", "type": "uint256"},
-				{"name": "profitabilityScore", "type": "uint256"},
-				{"name": "supportedCollaterals", "type": "bytes32[]"},
-				{"name": "isActive", "type": "bool"},
-				{"name": "lastExecutionTime", "type": "uint64"},
-				{"name": "totalOEVCaptured", "type": "uint256"},
-				{"name": "stakeAmount", "type": "uint256"}
-			]
-		}]
-	}]`
 	var err error
-	executorRegistryABI, err = abi.JSON(strings.NewReader(abiJSON))
+	executorRegistryABI, err = abi.JSON(strings.NewReader(`[
+		{"name": "getActiveExecutors", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"name": "", "type": "tuple[]", "components": [{"name": "executorAddress", "type": "address"}, {"name": "successfulLiquidations", "type": "uint256"}, {"name": "failedAttempts", "type": "uint256"}, {"name": "profitabilityScore", "type": "uint256"}, {"name": "supportedCollaterals", "type": "bytes32[]"}, {"name": "isActive", "type": "bool"}, {"name": "lastExecutionTime", "type": "uint64"}, {"name": "totalOEVCaptured", "type": "uint256"}, {"name": "stakeAmount", "type": "uint256"}]}]},
+		{"name": "updateExecutorStats", "type": "function", "stateMutability": "nonpayable", "inputs": [{"name": "executor", "type": "address"}, {"name": "successfulLiquidations", "type": "uint256"}, {"name": "failedAttempts", "type": "uint256"}, {"name": "totalOEVCaptured", "type": "uint256"}], "outputs": []}
+	]`))
 	if err != nil {
 		panic(fmt.Sprintf("execution: ExecutorRegistry ABI: %v", err))
+	}
+	auctionHouseABI, err = abi.JSON(strings.NewReader(`[
+		{"name": "startAuction", "type": "function", "stateMutability": "nonpayable", "inputs": [{"name": "positionId", "type": "uint256"}, {"name": "deadlineBlock", "type": "uint64"}], "outputs": []},
+		{"name": "getBestBid", "type": "function", "stateMutability": "view", "inputs": [{"name": "positionId", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}, {"name": "", "type": "uint256"}]},
+		{"name": "recordWinningBid", "type": "function", "stateMutability": "nonpayable", "inputs": [{"name": "positionId", "type": "uint256"}, {"name": "executor", "type": "address"}, {"name": "totalBid", "type": "uint256"}, {"name": "upfrontAmount", "type": "uint256"}], "outputs": []},
+		{"name": "settleSuccess", "type": "function", "stateMutability": "nonpayable", "inputs": [{"name": "positionId", "type": "uint256"}], "outputs": []},
+		{"name": "settleFailure", "type": "function", "stateMutability": "nonpayable", "inputs": [{"name": "positionId", "type": "uint256"}], "outputs": []}
+	]`))
+	if err != nil {
+		panic(fmt.Sprintf("execution: LiquidationAuctionHouse ABI: %v", err))
 	}
 }
 
@@ -51,7 +46,15 @@ func FetchActiveExecutors(ctx context.Context, client *evmwrap.Client, cfg *conf
 	if cfg == nil || cfg.ExecutorRegistryAddress == "" {
 		return nil, nil
 	}
-	results, err := client.Read(ctx, cfg.ExecutorRegistryAddress, "getActiveExecutors")
+	callData, err := executorRegistryABI.Pack("getActiveExecutors")
+	if err != nil {
+		return nil, nil
+	}
+	data, err := client.Read(ctx, cfg.ExecutorRegistryAddress, callData)
+	if err != nil || len(data) == 0 {
+		return nil, nil
+	}
+	results, err := executorRegistryABI.Unpack("getActiveExecutors", data)
 	if err != nil || len(results) == 0 {
 		return nil, nil
 	}
@@ -111,6 +114,32 @@ func SelectBestExecutorByStakeAndSuccess(executors []*contracts.Executor) *contr
 	return best
 }
 
+// StartAuction starts an auction for the given position with a deadline at deadlineBlock.
+// Must be called by the jelly engine (configured as jellyEngine on the contract).
+// Call this before FetchBestBid when using EXECUTION_STRATEGY=AUCTION.
+func StartAuction(
+	ctx context.Context,
+	client *evmwrap.Client,
+	cfg *config.Config,
+	positionID uint64,
+	deadlineBlock uint64,
+) error {
+	if cfg == nil || cfg.LiquidationAuctionHouseAddress == "" {
+		return nil
+	}
+	if client == nil {
+		return nil
+	}
+	positionIDBig := new(big.Int).SetUint64(positionID)
+	deadlineBig := new(big.Int).SetUint64(deadlineBlock)
+	callData, err := auctionHouseABI.Pack("startAuction", positionIDBig, deadlineBig)
+	if err != nil {
+		return err
+	}
+	_, err = client.Write(ctx, cfg.LiquidationAuctionHouseAddress, callData)
+	return err
+}
+
 // FetchBestBid reads the best bid for a given numeric position ID from the
 // LiquidationAuctionHouse contract, if configured. Returns empty address and 0
 // if no auction house is configured or if no bids are found.
@@ -127,13 +156,15 @@ func FetchBestBid(
 		return "", 0, nil
 	}
 
-	args := struct {
-		PositionId *big.Int
-	}{
-		PositionId: new(big.Int).SetUint64(positionID),
+	callData, err := auctionHouseABI.Pack("getBestBid", new(big.Int).SetUint64(positionID))
+	if err != nil {
+		return "", 0, err
 	}
-
-	results, err := client.Read(ctx, cfg.LiquidationAuctionHouseAddress, "getBestBid", args)
+	data, err := client.Read(ctx, cfg.LiquidationAuctionHouseAddress, callData)
+	if err != nil {
+		return "", 0, err
+	}
+	results, err := auctionHouseABI.Unpack("getBestBid", data)
 	if err != nil || len(results) < 2 {
 		return "", 0, err
 	}
@@ -181,8 +212,11 @@ func UpdateExecutorStats(
 		FailedAttempts:         new(big.Int).SetUint64(failDelta),
 		TotalOEVCaptured:       new(big.Int).SetUint64(oevDelta),
 	}
-
-	_, err := client.Write(ctx, cfg.ExecutorRegistryAddress, "updateExecutorStats", args)
+	callData, err := executorRegistryABI.Pack("updateExecutorStats", args.Executor, args.SuccessfulLiquidations, args.FailedAttempts, args.TotalOEVCaptured)
+	if err != nil {
+		return err
+	}
+	_, err = client.Write(ctx, cfg.ExecutorRegistryAddress, callData)
 	return err
 }
 
@@ -221,8 +255,11 @@ func RecordWinningBid(
 		TotalBid:      new(big.Int).SetUint64(totalBid),
 		UpfrontAmount: new(big.Int).SetUint64(upfront),
 	}
-
-	_, err := client.Write(ctx, cfg.LiquidationAuctionHouseAddress, "recordWinningBid", args)
+	callData, err := auctionHouseABI.Pack("recordWinningBid", args.PositionId, args.Executor, args.TotalBid, args.UpfrontAmount)
+	if err != nil {
+		return err
+	}
+	_, err = client.Write(ctx, cfg.LiquidationAuctionHouseAddress, callData)
 	return err
 }
 

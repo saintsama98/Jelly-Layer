@@ -66,28 +66,46 @@ func TestCalculateVolatility_SinglePrice(t *testing.T) {
 	}
 }
 
+func TestCalculateVolatility_Override(t *testing.T) {
+	// When VOLATILITY_OVERRIDE_<TOKEN> or VOLATILITY_OVERRIDE is set, API is not called.
+	key := EnvVolatilityOverridePrefix + "ETH"
+	prev := os.Getenv(key)
+	defer func() { _ = os.Setenv(key, prev) }()
+	_ = os.Setenv(key, "0.37")
+
+	// Mock would return error; if override is used we get 0.37 and no error
+	calc := NewCalculatorWithGetter(&mockGetter{err: errors.New("should not be called")})
+	vol, err := calc.CalculateVolatility(context.Background(), "ETH")
+	if err != nil {
+		t.Fatalf("override should skip HTTP: %v", err)
+	}
+	if vol != 0.37 {
+		t.Errorf("expected 0.37 from override, got %f", vol)
+	}
+}
+
 func TestCalculateVolatility_APIError(t *testing.T) {
+	// All sources (CoinGecko, Binance, CoinCap) get 404 -> "all volatility sources failed"
 	calc := NewCalculatorWithGetter(&mockGetter{statusCode: 404, body: []byte("not found")})
 
 	_, err := calc.CalculateVolatility(context.Background(), "ETH")
 	if err == nil {
-		t.Fatal("expected error on 404")
+		t.Fatal("expected error when all sources fail")
 	}
-	if msg := err.Error(); !strings.Contains(msg, "404") {
-		t.Errorf("error should mention 404, got: %s", msg)
+	if msg := err.Error(); !strings.Contains(msg, "failed") {
+		t.Errorf("error should mention failure, got: %s", msg)
 	}
 }
 
 func TestCalculateVolatility_NetworkError(t *testing.T) {
-	wantErr := errors.New("network failure")
-	calc := NewCalculatorWithGetter(&mockGetter{err: wantErr})
+	calc := NewCalculatorWithGetter(&mockGetter{err: errors.New("network failure")})
 
 	_, err := calc.CalculateVolatility(context.Background(), "ETH")
 	if err == nil {
 		t.Fatal("expected error on network failure")
 	}
-	if !errors.Is(err, wantErr) {
-		t.Errorf("expected error to wrap %v, got %v", wantErr, err)
+	if msg := err.Error(); !strings.Contains(msg, "failed") {
+		t.Errorf("error should mention failure, got: %s", msg)
 	}
 }
 

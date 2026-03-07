@@ -2,7 +2,6 @@ package evm
 
 // EVM reader utilities.
 //
-// Helper functions for reading contract state via the CRE SDK evm.Client.
-// Example usage:
-//
-//     results, err := client.Read(ctx, contractAddr, "getUserPositions", user)
+// Read(ctx, contractAddress, callData) performs eth_call via the CRE SDK
+// CallContract and returns the raw reply data. Callers pack ABI calldata
+// and unpack the result.

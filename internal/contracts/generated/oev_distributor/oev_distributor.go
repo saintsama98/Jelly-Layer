@@ -7,7 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm/bindings"
+
+	"github.com/jelly-layer-cre/jelly-engine/internal/contracts/bindingscompat"
 )
 
 // --- Event types ---
@@ -37,7 +38,7 @@ type OEVDistributor struct {
 	address   common.Address
 }
 
-func NewOEVDistributor(evmClient evm.Client, address common.Address, opts *bindings.BindingOptions) (*OEVDistributor, error) {
+func NewOEVDistributor(evmClient evm.Client, address common.Address, opts *bindingscompat.BindingOptions) (*OEVDistributor, error) {
 	return &OEVDistributor{
 		evmClient: evmClient,
 		address:   address,
@@ -50,8 +51,8 @@ func (od *OEVDistributor) LogTriggerOEVDistributedLog(
 	chainSelector uint64,
 	confidence evm.ConfidenceLevel,
 	filters []OEVDistributed,
-) (*bindings.LogTrigger[OEVDistributedDecoded], error) {
-	return &bindings.LogTrigger[OEVDistributedDecoded]{}, nil
+) (*bindingscompat.LogTrigger[OEVDistributedDecoded], error) {
+	return &bindingscompat.LogTrigger[OEVDistributedDecoded]{}, nil
 }
 
 

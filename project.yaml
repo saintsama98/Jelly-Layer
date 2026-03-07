@@ -14,7 +14,7 @@ workflows:
       - type: evm_log
         config:
           contract_address: "${PRIORITY_QUEUE_ADDRESS}"
-          event_signature: "PrioritiesSubmitted(uint256,uint256)"
+          event_signature: "PrioritiesSubmitted(uint256,uint256,uint256)"
       - type: evm_log
         config:
           contract_address: "${PRIORITY_QUEUE_ADDRESS}"
@@ -37,15 +37,15 @@ capabilities:
     config:
       timeout: 30s
 
-# Targets (environments)
-targets:
-  - name: local
-    config:
-      chain_id: 31337
-      rpc_url: "http://localhost:8545"
-  
-  - name: sepolia
-    config:
-      chain_id: 11155111
-      rpc_url: "${SEPOLIA_RPC_URL}"
+# Targets (environments). CRE CLI expects each target as a top-level key with an rpcs array.
+# Use --target sepolia or --target local. Chain names must match CRE supported networks.
+local:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: http://localhost:8545
+
+sepolia:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: https://ethereum-sepolia-rpc.publicnode.com
 

@@ -9,47 +9,53 @@ import (
 
 // Config holds all configuration for Jelly Engine.
 // This struct is used as the generic type parameter for cre.Workflow[*Config].
+// JSON tags are used when loading config from CRE workflow config files (e.g. config.sepolia.json).
 type Config struct {
 	// Chain configuration
-	ChainID       int64
-	ChainSelector uint64 // CRE chain selector (not the same as chain ID)
-	RPCURL        string
+	ChainID       int64  `json:"chain_id"`
+	ChainSelector uint64 `json:"chain_selector"` // CRE chain selector (not the same as chain ID)
+	RPCURL        string `json:"rpc_url"`
 
 	// Contract addresses (hex strings)
-	OracleAddress                  string
-	PriorityQueueAddress           string
-	ExecutorRegistryAddress        string
-	LiquidationOrchestratorAddress string
-	OEVDistributorAddress          string
-	LendingPoolAddress             string
+	OracleAddress                  string `json:"oracle_address"`
+	PriorityQueueAddress           string `json:"priority_queue_address"`
+	ExecutorRegistryAddress        string `json:"executor_registry_address"`
+	LiquidationOrchestratorAddress string `json:"liquidation_orchestrator_address"`
+	OEVDistributorAddress          string `json:"oev_distributor_address"`
+	LendingPoolAddress             string `json:"lending_pool_address"`
 
 	// Optional: address of LiquidationAuctionHouse for auction-based executor selection.
-	LiquidationAuctionHouseAddress string
+	LiquidationAuctionHouseAddress string `json:"liquidation_auction_house_address,omitempty"`
 
 	// Protocol adapter — determines which lending pool adapter to use.
 	// Supported: "jelly_mock", (future: "aave_v3", "morpho_blue", "compound_v3")
-	ProtocolType string
+	ProtocolType string `json:"protocol_type"`
 
 	// Workflow parameters
-	MaxLiquidationCapacity uint64  // in wei
-	MaxPriceImpact         float64 // percentage (0.05 = 5%)
-	LiquidationBonus       float64 // percentage (0.05 = 5%)
+	MaxLiquidationCapacity uint64  `json:"max_liquidation_capacity"` // in wei
+	MaxPriceImpact         float64 `json:"max_price_impact"`          // percentage (0.05 = 5%)
+	LiquidationBonus       float64 `json:"liquidation_bonus"`        // percentage (0.05 = 5%)
 	// OEV splits are expressed as fractions (0.50 = 50%).
-	// Current design: 50% protocol, 50% executor, 0% validator.
-	OEVProtocolSplit  float64 // e.g. 0.50 = 50%
-	OEVExecutorSplit  float64 // e.g. 0.50 = 50%
-	OEVValidatorSplit float64 // e.g. 0.00 = 0%
+	OEVProtocolSplit  float64 `json:"oev_protocol_split"`  // e.g. 0.50 = 50%
+	OEVExecutorSplit  float64 `json:"oev_executor_split"`  // e.g. 0.50 = 50%
+	OEVValidatorSplit float64 `json:"oev_validator_split"` // e.g. 0.00 = 0%
 
 	// Execution window
-	ExecutionDelayBlocks int64
-	ExecutionWindowSize  int64
+	ExecutionDelayBlocks int64 `json:"execution_delay_blocks"`
+	ExecutionWindowSize  int64 `json:"execution_window_size"`
 
 	// ExecutionStrategy controls how executors are selected for positions.
-	// Supported values:
-	//   - "STAKER_POOL" (default): highest stake * success rate
-	//   - "AUCTION": auction-style selection with on-chain accounting
-	//   - "ROUND_ROBIN": placeholder, currently falls back to STAKER_POOL
-	ExecutionStrategy string
+	// Supported: "STAKER_POOL" (default), "AUCTION", "ROUND_ROBIN"
+	ExecutionStrategy string `json:"execution_strategy"`
+
+	// AuctionBidWindowBlocks is the number of blocks after startAuction before we read getBestBid.
+	// Used when ExecutionStrategy is AUCTION; deadlineBlock = currentBlock + AuctionBidWindowBlocks.
+	AuctionBidWindowBlocks int64 `json:"auction_bid_window_blocks"`
+
+	// VolatilityDefaultToken is used when positions have no collateral token (e.g. from queue).
+	// If set (e.g. "ETH"), real-time volatility is fetched for this symbol instead of using 0.5.
+	// Leave empty to keep legacy behavior (default 0.5).
+	VolatilityDefaultToken string `json:"volatility_default_token"`
 }
 
 // Address bytes helpers — return 20-byte EVM addresses for use in evm.FilterLogTriggerRequest.
@@ -83,7 +89,7 @@ func LoadConfig() (*Config, error) {
 		LendingPoolAddress:             getEnv("LENDING_POOL_ADDRESS", ""),
 		LiquidationAuctionHouseAddress: getEnv("LIQUIDATION_AUCTION_HOUSE_ADDRESS", ""),
 		ProtocolType:                   getEnv("PROTOCOL_TYPE", "jelly_mock"),
-		MaxLiquidationCapacity:         getEnvUint64("MAX_LIQUIDATION_CAPACITY", 1_000_000_000_000_000_000_000_000),
+		MaxLiquidationCapacity:         getEnvUint64("MAX_LIQUIDATION_CAPACITY", 1_000_000_000_000_000_000), // 1e18 wei, uint64-safe
 		MaxPriceImpact:                 getEnvFloat64("MAX_PRICE_IMPACT", 0.05),
 		LiquidationBonus:               getEnvFloat64("LIQUIDATION_BONUS", 0.05),
 		// Default OEV split: 50% protocol / 50% executor / 0% validator.
@@ -93,6 +99,8 @@ func LoadConfig() (*Config, error) {
 		ExecutionDelayBlocks:           getEnvInt64("EXECUTION_DELAY_BLOCKS", 5),
 		ExecutionWindowSize:            getEnvInt64("EXECUTION_WINDOW_SIZE", 10),
 		ExecutionStrategy:              getEnv("EXECUTION_STRATEGY", "STAKER_POOL"),
+		AuctionBidWindowBlocks:         getEnvInt64("AUCTION_BID_WINDOW_BLOCKS", 5),
+		VolatilityDefaultToken:         getEnv("VOLATILITY_DEFAULT_TOKEN", ""),
 	}, nil
 }
 

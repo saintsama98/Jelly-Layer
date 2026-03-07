@@ -7,7 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm/bindings"
+
+	"github.com/jelly-layer-cre/jelly-engine/internal/contracts/bindingscompat"
 )
 
 // LiquidationExecuted represents the LiquidationExecuted(uint256 indexed positionId, address indexed executor, uint256 capturedOEV, bytes32 txHash) event.
@@ -47,7 +48,7 @@ type LiquidationOrchestrator struct {
 }
 
 // NewLiquidationOrchestrator creates a new binding instance.
-func NewLiquidationOrchestrator(evmClient evm.Client, address common.Address, opts *bindings.BindingOptions) (*LiquidationOrchestrator, error) {
+func NewLiquidationOrchestrator(evmClient evm.Client, address common.Address, opts *bindingscompat.BindingOptions) (*LiquidationOrchestrator, error) {
 	return &LiquidationOrchestrator{
 		evmClient: evmClient,
 		address:   address,
@@ -59,8 +60,8 @@ func (lo *LiquidationOrchestrator) LogTriggerLiquidationExecutedLog(
 	chainSelector uint64,
 	confidence evm.ConfidenceLevel,
 	filters []LiquidationExecuted,
-) (*bindings.LogTrigger[LiquidationExecutedDecoded], error) {
-	return &bindings.LogTrigger[LiquidationExecutedDecoded]{}, nil
+) (*bindingscompat.LogTrigger[LiquidationExecutedDecoded], error) {
+	return &bindingscompat.LogTrigger[LiquidationExecutedDecoded]{}, nil
 }
 
 

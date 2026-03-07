@@ -2,7 +2,6 @@ package evm
 
 // EVM writer utilities.
 //
-// Helper functions for writing to contracts via the CRE SDK evm.Client.
-// Example usage:
-//
-//     txHash, err := client.Write(ctx, contractAddr, "submitPositions", positions)
+// Write(ctx, contractAddress, callData) sends a transaction via the CRE SDK
+// WriteReport (receiver = contract, report payload = ABI-encoded calldata).
+// Callers pack ABI calldata before calling.

@@ -7,7 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm"
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm/bindings"
+
+	"github.com/jelly-layer-cre/jelly-engine/internal/contracts/bindingscompat"
 )
 
 // --- Event types ---
@@ -36,7 +37,7 @@ type ChainlinkAggregator struct {
 }
 
 // NewChainlinkAggregator creates a new contract binding.
-func NewChainlinkAggregator(evmClient evm.Client, address common.Address, opts *bindings.BindingOptions) (*ChainlinkAggregator, error) {
+func NewChainlinkAggregator(evmClient evm.Client, address common.Address, opts *bindingscompat.BindingOptions) (*ChainlinkAggregator, error) {
 	return &ChainlinkAggregator{
 		evmClient: evmClient,
 		address:   address,
@@ -50,8 +51,8 @@ func (c *ChainlinkAggregator) LogTriggerAnswerUpdatedLog(
 	chainSelector uint64,
 	confidence evm.ConfidenceLevel,
 	filters []AnswerUpdated,
-) (*bindings.LogTrigger[AnswerUpdatedDecoded], error) {
-	return &bindings.LogTrigger[AnswerUpdatedDecoded]{}, nil
+) (*bindingscompat.LogTrigger[AnswerUpdatedDecoded], error) {
+	return &bindingscompat.LogTrigger[AnswerUpdatedDecoded]{}, nil
 }
 
 // --- Read methods ---

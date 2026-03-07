@@ -1,0 +1,44 @@
+================================================================================
+FULL WORKFLOW SIMULATION – SUMMARY
+================================================================================
+Run finished: 2026-03-07 (demo-output.log, demo-output-volatility.log)
+
+--------------------------------------------------------------------------------
+WORKFLOW STEPS
+--------------------------------------------------------------------------------
+  Step 1 – Detection (cron)     OK   PositionsFound=1, submit tx broadcast
+  Step 2 – Prioritization       OK   Processed=1, Deferred=0, updateQueue broadcast
+  Step 3 – Execution            OK   Executed=1, Failed=0, liquidation succeeded
+  Step 4 – Distribution         FAIL captureOEV reverted (0 OEV; expected in this setup)
+
+--------------------------------------------------------------------------------
+VOLATILITY IN THIS RUN
+--------------------------------------------------------------------------------
+  • Default token:        ETH (from config.sepolia.json)
+  • Behaviour:            Real-time fetch was attempted for ETH (no collateral token in positions).
+  • CoinGecko:            FAILED – DNS/connection error inside CRE simulate (connection reset by peer).
+  • Binance:              FAILED – same (lookup api.binance.com … connection reset by peer).
+  • CoinCap:              FAILED – same (lookup api.coincap.io … connection reset by peer).
+  • Fallback:             Used numeric default volatility = 0.5 (as designed).
+  • Position score:       volatility=0.5, score≈17, strategy=moderate.
+
+  Conclusion: Volatility logic is correct (attempts all three APIs, then fallback).
+  The CRE workflow simulate environment does not allow outbound HTTP/DNS from the
+  WASM runtime, so all three APIs fail there. From the host, the same APIs work
+  (run: ./scripts/test-volatility-apis.sh).
+
+--------------------------------------------------------------------------------
+REALTIME STATS (from run)
+--------------------------------------------------------------------------------
+  Detection:    positions=1, totalOEVPotential=0
+  Prioritization: meanVolatility=0.5, strategy=moderate, totalProcessed=1, totalDeferred=0
+  Execution:    executed=1, failed=0
+  Distribution: fromEvent=0, finalUsed=0, source=event
+
+--------------------------------------------------------------------------------
+OUTPUT FILES
+--------------------------------------------------------------------------------
+  Full log:      demo-output.log
+  Volatility:    demo-output-volatility.log (all volatility-related lines)
+
+================================================================================
